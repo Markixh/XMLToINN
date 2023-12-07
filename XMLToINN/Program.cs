@@ -1,4 +1,5 @@
-﻿using System.Xml;
+﻿using System.Diagnostics;
+using System.Xml;
 
 namespace XMLToINN
 {
@@ -7,7 +8,7 @@ namespace XMLToINN
         static List<string> INNUL = new List<string>();
         static List<string> INNFL = new List<string>();
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             List<Thread> Threads = new List<Thread>();
             var curentPath = Path.GetDirectoryName(typeof(Program).Assembly.Location);
@@ -17,35 +18,37 @@ namespace XMLToINN
 
             Console.WriteLine($"Найдено {XMLFiles.Length} XML-файлов");
 
-            int c = 0;
             foreach (var file in XMLFiles)
             {
-                var thread = new Thread(parserXML);
-                Threads.Add(thread);
-                thread.Start(file);
-                if(c++ == 100)
-                {
-                    c = 0;
-                    Console.SetCursorPosition(0, 1);
-                    var pr = (Threads.Count * 100) / XMLFiles.Length;
-                    Console.WriteLine($"{Threads.Count}/{XMLFiles.Length} {pr}%");
-                }
+                ThreadPool.QueueUserWorkItem(parserXML, file);
+
+                var procent = (int)((ThreadPool.CompletedWorkItemCount * 100) / XMLFiles.Length);
+                Console.SetCursorPosition(0, 1);
+                Console.WriteLine($"{ThreadPool.CompletedWorkItemCount} из {XMLFiles.Length} {procent}%");                
             }
 
-            while (!Threads.Any(x => x.Join(1000)))
+            while (ThreadPool.PendingWorkItemCount != 0)
             {
+                var procent = (int)((ThreadPool.CompletedWorkItemCount * 100) / XMLFiles.Length);
                 Console.SetCursorPosition(0, 1);
-                var pr = (Threads.Count * 100) / XMLFiles.Length;
-                Console.WriteLine($"{Threads.Count}/{XMLFiles.Length} {pr}%");
+                Console.WriteLine($"{ThreadPool.CompletedWorkItemCount} из {XMLFiles.Length} {procent}%");
             }
+
+            Console.SetCursorPosition(0, 1);
+            Console.WriteLine($"{XMLFiles.Length} из {XMLFiles.Length} 100%");
 
             Console.WriteLine("Получено:");
-            Console.WriteLine($"ИНН ФЛ {INNFL.Count}");
-            Console.WriteLine($"ИНН ЮЛ {INNUL.Count}");
 
-            File.AppendAllLinesAsync(Path.Combine(OutPath, "ИННФЛ.txt"), INNFL);
-            File.AppendAllLinesAsync(Path.Combine(OutPath, "ИННЮЛ.txt"), INNUL);
-
+            lock (INNFL)
+            {
+                Console.WriteLine($"ИНН ФЛ {INNFL.Count}");
+                File.AppendAllLinesAsync(Path.Combine(OutPath, "ИННФЛ.txt"), INNFL).Wait();
+            }
+            lock (INNUL)
+            {
+                Console.WriteLine($"ИНН ЮЛ {INNUL.Count}");
+                File.AppendAllLinesAsync(Path.Combine(OutPath, "ИННЮЛ.txt"), INNUL).Wait();
+            }
             Console.WriteLine("Списки сохранены в файлы.");
 
             Console.ReadKey();
@@ -72,10 +75,7 @@ namespace XMLToINN
                         if (xmlReader.HasAttributes)
                             if (xmlReader.GetAttribute("КодРегион") == "46")
                             {
-                                lock (INNFL)
-                                {
-                                    innFL.Add(INN);
-                                }
+                                innFL.Add(INN);
                             }
                     }
                 }
@@ -89,18 +89,15 @@ namespace XMLToINN
                         if (xmlReader.HasAttributes)
                             if (xmlReader.GetAttribute("КодРегион") == "46")
                             {
-                                lock (INNUL)
-                                {
-                                    innUL.Add(INN);
-                                }
+                                innUL.Add(INN);
                             }
                     }
                 }
             }
 
-            if (innFL.Count > 0) 
+            if (innFL.Count > 0)
             {
-                lock (INNFL) 
+                lock (INNFL)
                 {
                     INNFL.AddRange(innFL);
                 }
